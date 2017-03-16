@@ -13,17 +13,21 @@
 
 (defn- get-team-id [org team]
   (let [teams (github-fetch "orgs/" org "/teams")]
-    ((first(filter #(= (% :name) team) teams)) :id)))
+    ((first (filter #(= (% :name) team) teams)) :id)))
 
-(defn- get-members [org team]
-  (github-fetch "teams/" (get-team-id org team) "/members"))
+(defn- get-member-logins [org team]
+  (map #(% :login) (github-fetch "teams/" (get-team-id org team) "/members")))
 
-(defn- get-org-prs [org team]
+(defn- get-org-prs [org]
   (let [repos (github-fetch "orgs/" org "/repos")]
-    (concat (map #(github-fetch "repos/" org "/" (% :name) "/pulls") repos))))
+    (apply concat (map #(github-fetch "repos/" org "/" (% :name) "/pulls") repos))))
+
+(defn- get-team-prs [org team]
+  (let [prs (get-org-prs org) member-logins (get-member-logins org team)]
+    (filter #(some #{((% :user) :login)} member-logins) prs)))
 
 (defroutes api-routes
-  (GET "/:org/:team" [org team] {:body (get-org-prs org team)})
+  (GET "/:org/:team" [org team] {:body (get-team-prs org team)})
   (route/not-found {:body {:error "Page not found"}}))
 
 (def api
