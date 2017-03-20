@@ -1,31 +1,37 @@
 (ns openpr.core
-  (:require [compojure.core :refer :all]
-            [compojure.route :as route]
-            [clojure.edn :as edn]
-            [ring.middleware.json :as json]
-            [ring.middleware.params :as params]
-            [clj-http.client :as client]
+  (:require [clojure.edn :as edn]
             [clojure.string :refer [join]]
-            [environ.core :refer [env]]))
+            [clj-http.client :as client]
+            [compojure.core :refer :all]
+            [compojure.route :as route]
+            [environ.core :refer [env]]
+            [ring.middleware.json :as json]
+            [ring.middleware.params :as params]))
 
 (defn- github-fetch [& params]
-  ((client/get (str "https://api.github.com/" (join "/" params))
-    {:basic-auth [(env :github-user) (env :github-pass)] :accept :json :as :auto}) :body))
+  (-> "https://api.github.com/"
+      (str (join "/" params))
+      (client/get {:basic-auth [(:github-user env) (:github-pass env)] :accept :json :as :auto})
+      :body))
 
 (defn- get-team-id [org team]
-  (let [teams (github-fetch "orgs" org "teams")]
-    ((first (filter #(= (% :name) team) teams)) :id)))
+  (->> (github-fetch "orgs" org "teams")
+       (filter #(= (:name %) team))
+       first
+       :id))
 
 (defn- get-member-logins [org team]
-  (map #(% :login) (github-fetch "teams" (get-team-id org team) "members")))
+  (->> (github-fetch "teams" (get-team-id org team) "members")
+       (map :login)))
 
 (defn- get-org-prs [org]
-  (let [repos (github-fetch "orgs" org "repos")]
-    (apply concat (map #(github-fetch "repos" org (% :name) "pulls") repos))))
+  (->> (github-fetch "orgs" org "repos")
+       (map #(github-fetch "repos" org (:name %) "pulls"))
+       flatten))
 
 (defn- get-team-prs [org team]
   (let [prs (get-org-prs org) member-logins (get-member-logins org team)]
-    (filter #(some #{((% :user) :login)} member-logins) prs)))
+    (filter #(some #{(:login (:user %))} member-logins) prs)))
 
 (defroutes api-routes
   (GET "/:org/:team" [org team] {:body (get-team-prs org team)})
@@ -33,5 +39,5 @@
 
 (def api
   (-> api-routes
-    params/wrap-params
-    json/wrap-json-response))
+      params/wrap-params
+      json/wrap-json-response))
